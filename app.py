@@ -80,149 +80,148 @@ st.set_page_config(
 )
 
 # ==========================================
-# FUTURISTIC AQUA THEME CUSTOM CSS
+# CLEAN WINDOWS AQUA LIGHT THEME CUSTOM CSS
 # ==========================================
 st.markdown("""
 <style>
-/* Futuristic Dark Aqua Canvas */
+/* Clean Windows Aqua Gradient Background */
 .stApp {
-    background: linear-gradient(135deg, #070e17 0%, #0d1b2a 50%, #0a192f 100%);
-    color: #e2e8f0;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #ebf5fb 0%, #d4e6f1 50%, #aed6f1 100%);
+    color: #1c2833;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
 }
 
-/* Page Layout Container Width */
+/* Main Container Width & Spacing */
 .main .block-container {
     padding-top: 2rem;
     padding-bottom: 3rem;
     max-width: 1280px;
 }
 
-/* Futuristic Neon Aqua Headers */
+/* Deep Ocean Blue Headers (No Neon) */
 h1 {
-    color: #00f2fe !important;
-    font-weight: 800 !important;
-    text-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
-    letter-spacing: -0.5px;
+    color: #1b4f72 !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.3px;
 }
 
 h2, h3, h4 {
-    color: #e0f2fe !important;
+    color: #21618c !important;
     font-weight: 600 !important;
 }
 
-/* Glassmorphic Form Cards & Panels */
+/* Windows Acrylic/Mica Glass Cards */
 .stForm, div[data-testid="stExpander"] {
-    background: rgba(15, 28, 47, 0.65) !important;
-    border: 1px solid rgba(0, 242, 254, 0.25) !important;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    backdrop-filter: blur(10px);
-    border-radius: 14px !important;
+    background: rgba(255, 255, 255, 0.92) !important;
+    border: 1px solid rgba(41, 128, 185, 0.25) !important;
+    box-shadow: 0 4px 16px rgba(0, 51, 102, 0.08);
+    backdrop-filter: blur(8px);
+    border-radius: 10px !important;
     padding: 1.5rem;
 }
 
-/* Tab Bar - Glowing Futuristic Pills */
+/* Windows Tab Control Strip */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 12px;
-    background: rgba(13, 27, 42, 0.8);
-    padding: 8px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(0, 242, 254, 0.15);
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 6px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(41, 128, 185, 0.2);
 }
 
 .stTabs [data-baseweb="tab"] {
-    height: 48px;
+    height: 42px;
     background-color: transparent;
-    border-radius: 8px;
-    color: #94a3b8;
+    border-radius: 6px;
+    color: #4a6572;
     font-weight: 600;
-    padding: 0 22px;
-    transition: all 0.3s ease;
+    padding: 0 20px;
+    transition: all 0.2s ease;
 }
 
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, rgba(0, 242, 254, 0.25) 0%, rgba(79, 172, 254, 0.25) 100%) !important;
-    color: #00f2fe !important;
-    border: 1px solid rgba(0, 242, 254, 0.5) !important;
-    box-shadow: 0 0 15px rgba(0, 242, 254, 0.25);
+    background: #ffffff !important;
+    color: #1b4f72 !important;
+    border: 1px solid #2980b9 !important;
+    box-shadow: 0 2px 6px rgba(41, 128, 185, 0.15);
 }
 
-/* Glowing Cyber Action Buttons */
+/* Windows Corporate Blue Action Buttons */
 .stButton > button[kind="primary"], div.stForm button[kind="primary"] {
-    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%) !important;
-    color: #050b14 !important;
-    font-weight: 700 !important;
-    border: none !important;
-    border-radius: 10px !important;
-    padding: 0.6rem 1.6rem !important;
-    box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
-    transition: all 0.3s ease !important;
+    background: linear-gradient(180deg, #3498db 0%, #2980b9 100%) !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    border: 1px solid #1f618d !important;
+    border-radius: 6px !important;
+    padding: 0.5rem 1.5rem !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
+    transition: all 0.2s ease !important;
 }
 
 .stButton > button[kind="primary"]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 0 30px rgba(0, 242, 254, 0.7) !important;
+    background: linear-gradient(180deg, #2980b9 0%, #2471a3 100%) !important;
+    border-color: #1a5276 !important;
 }
 
-/* Secondary Buttons */
+/* Secondary Action Buttons */
 .stButton > button[kind="secondary"] {
-    background: rgba(15, 28, 47, 0.8) !important;
-    color: #00f2fe !important;
-    border: 1px solid rgba(0, 242, 254, 0.4) !important;
-    border-radius: 10px !important;
-    transition: all 0.3s ease !important;
+    background: #ffffff !important;
+    color: #2980b9 !important;
+    border: 1px solid #aed6f1 !important;
+    border-radius: 6px !important;
+    transition: all 0.2s ease !important;
 }
 
 .stButton > button[kind="secondary"]:hover {
-    background: rgba(0, 242, 254, 0.15) !important;
-    border-color: #00f2fe !important;
+    background: #ebf5fb !important;
+    border-color: #2980b9 !important;
 }
 
-/* Sidebar Styling */
+/* Clean Windows Sidebar */
 section[data-testid="stSidebar"] {
-    background-color: #050b14 !important;
-    border-right: 1px solid rgba(0, 242, 254, 0.15);
+    background-color: #f4f8fb !important;
+    border-right: 1px solid #d4e6f1;
 }
 
-/* Inputs & Form Elements */
+/* Input Fields & Dropdowns */
 .stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input, .stTextArea textarea {
-    background-color: rgba(10, 25, 47, 0.8) !important;
-    color: #f1f5f9 !important;
-    border: 1px solid rgba(0, 242, 254, 0.3) !important;
-    border-radius: 8px !important;
+    background-color: #ffffff !important;
+    color: #1c2833 !important;
+    border: 1px solid #aed6f1 !important;
+    border-radius: 6px !important;
 }
 
 .stTextInput input:focus, .stTextArea textarea:focus {
-    border-color: #00f2fe !important;
-    box-shadow: 0 0 12px rgba(0, 242, 254, 0.3) !important;
+    border-color: #2980b9 !important;
+    box-shadow: 0 0 6px rgba(41, 128, 185, 0.3) !important;
 }
 
-/* Dynamic Alert Cards */
+/* Informational Card Panels */
 div.stAlert {
-    background: rgba(10, 25, 47, 0.85) !important;
-    border: 1px solid rgba(0, 242, 254, 0.3) !important;
-    border-radius: 10px !important;
-    color: #e0f2fe !important;
+    background: #ffffff !important;
+    border: 1px solid #aed6f1 !important;
+    border-radius: 8px !important;
+    color: #1b4f72 !important;
 }
 
-/* Glassmorphic Data Table Wrapper */
+/* Data Tables */
 [data-testid="stDataFrame"] {
-    border: 1px solid rgba(0, 242, 254, 0.25);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    border: 1px solid #d4e6f1;
+    border-radius: 8px;
+    background-color: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
-/* File Upload Glass Boxes */
+/* File Upload Dropzone */
 [data-testid="stFileUploadDropzone"] {
-    background: rgba(15, 28, 47, 0.5) !important;
-    border: 1.5px dashed rgba(0, 242, 254, 0.4) !important;
-    border-radius: 12px !important;
+    background: rgba(255, 255, 255, 0.75) !important;
+    border: 1.5px dashed #2980b9 !important;
+    border-radius: 8px !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Engineering BOM & Drawing Audit Agent")
+st.title("🛠️ Engineering BOM & Drawing Audit Agent")
 
 # Load persistent rules memory
 all_rules = load_rules()
