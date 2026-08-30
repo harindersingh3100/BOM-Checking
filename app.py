@@ -32,7 +32,7 @@ def save_rules(rules_dict):
     with open(RULES_FILE, "w") as f:
         json.dump(rules_dict, f, indent=4)
 
-def generate_excel_report(audit_result, disc_df, category, model_used, total_pages, stock_length_mm):
+def generate_excel_report(audit_result, disc_df, category, model_used, total_files, total_pages, stock_length_mm):
     """Generates an in-memory Excel file with Summary and Discrepancies tabs."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -41,6 +41,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
             "Parameter": [
                 "Equipment Category",
                 "Standard Stock Profile Length",
+                "Total Drawing Files Scanned",
                 "Total Drawing Pages Scanned",
                 "Audit Status",
                 "AI Model Used",
@@ -50,6 +51,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
             "Details": [
                 category,
                 f"{stock_length_mm} mm",
+                total_files,
                 total_pages,
                 audit_result.get("audit_status", "N/A"),
                 model_used,
@@ -73,7 +75,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
 st.set_page_config(page_title="Categorized ERP BOM & Drawing Audit Agent", layout="wide")
 
 st.title("🛠️ Engineering BOM & Drawing Audit Agent")
-st.markdown("Multi-page, multi-category agent with configurable stock profile lengths and dual normalization.")
+st.markdown("Multi-file, multi-page agent for cross-checking multiple PDF drawings against a single ERP CSV BOM.")
 
 # --- LOAD MEMORY DATA ---
 all_rules = load_rules()
@@ -140,41 +142,51 @@ stock_length_mm = st.sidebar.number_input(
 if not api_key:
     st.warning("Please enter your Gemini API Key in the sidebar to proceed.")
 else:
-    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-Page Auto-Scan | Stock Conversion Basis: `{stock_length_mm} mm` | Active Normalizations: Variant Suffixes (-A/-B) & Cut-Lengths (-1000mm)")
+    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-PDF File Upload Enabled | Stock Length: `{stock_length_mm} mm` | Active Normalizations: Variant Suffixes (-A/-B) & Cut-Lengths (-1000mm)")
 
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📁 Upload ERP BOM (.csv)")
-        csv_file = st.file_uploader("Upload exported ERP BOM", type=["csv"])
+        csv_file = st.file_uploader("Upload single ERP BOM CSV file", type=["csv"])
         
     with col2:
-        st.subheader("📐 Upload Drawing (.pdf)")
-        pdf_file = st.file_uploader("Upload Engineering Drawing PDF (All pages scanned automatically)", type=["pdf"])
+        st.subheader("📐 Upload Drawing PDFs (.pdf)")
+        pdf_files = st.file_uploader(
+            "Upload one or multiple Engineering Drawing PDFs", 
+            type=["pdf"], 
+            accept_multiple_files=True
+        )
 
-    if csv_file and pdf_file:
+    if csv_file and pdf_files:
         erp_df = pd.read_csv(csv_file)
         
         st.write(f"**Uploaded ERP BOM Data ({len(erp_df)} total rows):**")
         st.dataframe(erp_df, use_container_width=True)
+        st.write(f"**Selected PDF Drawing Files:** {len(pdf_files)} file(s) ready for processing.")
 
-        if st.button("Run Full Multi-Page Cross-Check Audit", type="primary"):
-            with st.spinner("Processing all PDF drawing pages, running normalization logic, and performing ERP audit..."):
+        if st.button("Run Full Multi-PDF Cross-Check Audit", type="primary"):
+            with st.spinner("Processing all PDF drawing pages across all files, compiling BOM data, and auditing against ERP CSV..."):
                 try:
-                    # 1. Convert ALL PDF Pages to Image Parts
-                    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-                    total_pages = len(doc)
+                    # 1. Convert ALL PDF Pages from ALL Uploaded PDF Files into Image Parts
                     image_parts = []
+                    total_pages = 0
+                    total_files = len(pdf_files)
 
-                    for page_num in range(total_pages):
-                        page = doc[page_num]
-                        pix = page.get_pixmap(dpi=300)
-                        img_bytes = pix.tobytes("png")
-                        image_parts.append(
-                            types.Part.from_bytes(data=img_bytes, mime_type="image/png")
-                        )
+                    for pdf_file in pdf_files:
+                        pdf_bytes = pdf_file.read()
+                        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                        total_pages += len(doc)
+                        
+                        for page_num in range(len(doc)):
+                            page = doc[page_num]
+                            pix = page.get_pixmap(dpi=300)
+                            img_bytes = pix.tobytes("png")
+                            image_parts.append(
+                                types.Part.from_bytes(data=img_bytes, mime_type="image/png")
+                            )
 
-                    st.info(f"📄 Successfully loaded {total_pages} drawing page(s) for audit.")
+                    st.info(f"📄 Successfully loaded {total_pages} page(s) across {total_files} PDF drawing file(s) for audit.")
 
                     # 2. Compile Active Rules Context
                     universal_rules = all_rules.get("General / Universal", [])
@@ -191,13 +203,13 @@ else:
 
                     rules_context_str = "\n".join(combined_rules) if combined_rules else "None specified."
 
-                    # 3. Prepare API client & prompt with Dynamic Stock Length Suffix Normalization instructions
+                    # 3. Prepare API client & prompt for Multi-PDF Cross-Check
                     client = genai.Client(api_key=api_key)
                     erp_csv_text = erp_df.to_csv(index=False)
 
                     prompt = f"""
                     You are an expert mechanical engineering AI auditor specializing in {selected_category} manufacturing systems.
-                    You are provided with all pages of an engineering drawing document and an ERP BOM CSV dataset.
+                    You are provided with all drawing pages from {total_files} engineering PDF drawing files and a single ERP BOM CSV dataset.
                     
                     Equipment Category Being Audited: {selected_category}
                     Configured Standard Stock Length: {stock_length_mm} mm
@@ -205,44 +217,47 @@ else:
                     Mandatory Learned Memory Rules:
                     {rules_context_str}
                     
-                    CRITICAL MANDATORY PART CODE NORMALIZATION & QUANTITY AUDIT RULES:
+                    CRITICAL MANDATORY PART CODE NORMALIZATION & MULTI-DRAWING AGGREGATION RULES:
                     
-                    RULE A: VARIANT SUFFIX NORMALIZATION (Letter Suffixes like -A, -B)
+                    1. AGGREGATE ACROSS ALL FILES & PAGES:
+                       - Collect and consolidate all BOM table entries and balloon callouts from ALL provided drawing pages across ALL uploaded PDF files into a single master drawing inventory.
+                    
+                    2. RULE A: VARIANT SUFFIX NORMALIZATION (Letter Suffixes like -A, -B)
                        - Suffixes containing letters (e.g., '-A', '-B', '-REV1') indicate variants or revisions.
                        - Strip the variant suffix to find the Parent Part Code (e.g., 'SF0000000001-A' -> 'SF0000000001').
-                       - Sum the quantities directly across all drawing pages (e.g., Base Qty 5 + Variant-A Qty 1 + Variant-B Qty 2 = Total 7 pcs).
+                       - Sum quantities directly across ALL drawing pages/files (e.g., Base Qty 5 + Variant-A Qty 1 + Variant-B Qty 2 = Total 7 pcs).
                     
-                    RULE B: CUT-LENGTH SUFFIX NORMALIZATION & {stock_length_mm}mm STOCK CONVERSION (Numeric Suffixes like -1000, -1500)
+                    3. RULE B: CUT-LENGTH SUFFIX NORMALIZATION & {stock_length_mm}mm STOCK CONVERSION (Numeric Suffixes like -1000, -1500)
                        - Suffixes containing numbers (e.g., '-1000', '-1500', '-2500') represent cut lengths in millimeters (mm).
                        - Strip the length suffix to identify the Parent Part Code (e.g., 'SF0000000020-1000' -> Parent Code 'SF0000000020').
-                       - For each cut length entry, calculate length contribution: (Cut Length in mm) x (Quantity).
-                       - Sum ALL millimeter contributions for the same Parent Part Code across all pages to get TOTAL MILLIMETERS REQUIRED.
+                       - For each cut length entry across all drawings, calculate length contribution: (Cut Length in mm) x (Quantity).
+                       - Sum ALL millimeter contributions for the same Parent Part Code across ALL files/pages to get TOTAL MILLIMETERS REQUIRED.
                        - CONVERT TO ERP STOCK PIECES:
                          * ERP BOM lists raw profiles in standard {stock_length_mm} mm stock lengths (Pieces).
                          * Calculate required stock pieces = ceil(TOTAL MILLIMETERS REQUIRED / {stock_length_mm}). Always round UP to the next whole integer.
                        - WORKED CALCULATION EXAMPLE (using {stock_length_mm} mm stock):
-                         * 'SF0000000020-1000', Qty: 2 -> 1000 mm x 2 = 2000 mm
-                         * 'SF0000000020-1500', Qty: 1 -> 1500 mm x 1 = 1500 mm
-                         * Total required length = 2000 + 1500 = 3500 mm
+                         * File 1 has 'SF0000000020-1000', Qty: 2 -> 1000 mm x 2 = 2000 mm
+                         * File 2 has 'SF0000000020-1500', Qty: 1 -> 1500 mm x 1 = 1500 mm
+                         * Total required length across files = 2000 + 1500 = 3500 mm
                          * ERP Stock Pieces Required = ceil(3500 / {stock_length_mm}).
                     
-                    RULE C: CONSOLIDATED BOM BLOCK / SUMMARY TABLE LOOKUP
-                       - Check if any drawing page contains an explicitly written 'Consolidated BOM', 'Summary Table', or 'Assembly BOM'.
-                       - Cross-verify your calculated parent quantities against any summary table present on the drawing.
+                    4. RULE C: CONSOLIDATED BOM BLOCK / SUMMARY TABLE LOOKUP
+                       - Check if any drawing page across the files contains an explicitly written 'Consolidated BOM', 'Summary Table', or 'Assembly BOM'.
+                       - Cross-verify your calculated parent quantities against any summary table present on the drawings.
                     
                     ERP AUDIT & ALARM TRIGGER:
-                       - Compare the normalized calculated drawing quantity (from Rule A or Rule B) against the Parent Part Code Qty in the ERP BOM CSV.
-                       - IF ERP BOM Qty matches the calculated required quantity, mark as OK.
+                       - Compare the consolidated calculated drawing quantity for each Parent Part Code against the corresponding Parent Part Code Qty in the single uploaded ERP BOM CSV.
+                       - IF ERP BOM Qty matches the consolidated required quantity, mark as OK.
                        - IF THERE IS ANY VARIATION, IMMEDIATELY trigger an ALARM / DISCREPANCY.
-                       - In the discrepancy report, show the full math breakdown (e.g., "Drawing requires 3500 mm [1000mm x2 + 1500mm x1] = ceil(3500/{stock_length_mm}) = required stock pcs vs ERP BOM Qty").
+                       - In the discrepancy report, show the full multi-file math breakdown (e.g., "Drawings combined require 3500 mm [1000mm x2 + 1500mm x1] = ceil(3500/{stock_length_mm}) = required stock pcs vs ERP BOM Qty").
                     
                     ERP BOM Data:
                     {erp_csv_text}
                     
                     Instructions:
-                    1. Extract all BOM items across ALL drawing pages.
-                    2. Apply Rule A or Rule B normalization depending on whether the suffix is a letter variant or a numeric cut-length.
-                    3. Compare calculated parent totals against the ERP BOM CSV.
+                    1. Extract and aggregate all BOM items across ALL pages of ALL uploaded drawing files.
+                    2. Apply Rule A or Rule B normalization depending on suffix type.
+                    3. Compare consolidated parent totals against the single ERP BOM CSV.
                     4. Check for missing parts, extra parts, or rule violations based on learned memory rules.
                     5. Output a structured JSON response matching the required schema.
                     """
@@ -307,7 +322,7 @@ else:
 
                     audit_result = json.loads(response.text)
                     
-                    st.success(f"Audit Complete across all {total_pages} drawing page(s)! (Executed with `{successful_model}`)")
+                    st.success(f"Audit Complete across {total_files} drawing file(s) / {total_pages} page(s)! (Executed with `{successful_model}`)")
                     st.write(f"**Status:** {audit_result.get('audit_status')}")
                     st.write(f"**Notes:** {audit_result.get('general_notes')}")
                     
@@ -318,14 +333,14 @@ else:
                         st.warning(f"Found {len(disc_list)} Discrepancies/Checks:")
                         st.dataframe(disc_df, use_container_width=True)
                     else:
-                        st.info("No discrepancies found. All normalized quantities, stock lengths, and drawing parts match the ERP BOM perfectly.")
+                        st.info("No discrepancies found. All aggregated normalized quantities, stock profile lengths, and drawing parts across all files match the ERP BOM perfectly.")
 
                     # --- EXCEL DOWNLOAD BUTTON ---
-                    excel_data = generate_excel_report(audit_result, disc_df, selected_category, successful_model, total_pages, stock_length_mm)
+                    excel_data = generate_excel_report(audit_result, disc_df, selected_category, successful_model, total_files, total_pages, stock_length_mm)
                     filename_cat = selected_category.lower().replace(" ", "_").replace("/", "_")
                     
                     st.download_button(
-                        label="📥 Download Consolidated Audit Report (.xlsx)",
+                        label="📥 Download Consolidated Multi-Drawing Audit Report (.xlsx)",
                         data=excel_data,
                         file_name=f"audit_report_{filename_cat}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
