@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import fitz  # PyMuPDF
+import pymupdf as fitz
 import json
 import os
 from google import genai
