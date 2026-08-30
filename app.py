@@ -78,11 +78,10 @@ else:
                     image_path = "temp_audit_page.png"
                     pix.save(image_path)
 
-                    # 2. Prepare client and formatting rules
+                    # 2. Prepare API client
                     client = genai.Client(api_key=api_key)
                     
                     rules_context = "\n".join([f"- {r}" for r in learned_rules]) if learned_rules else "None"
-                    
                     erp_csv_text = erp_df.to_csv(index=False)
 
                     prompt = f"""
@@ -102,6 +101,31 @@ else:
                     4. Return a structured JSON response containing an array of discrepancies found, or a statement if everything matches perfectly.
                     """
 
+                    # Define the JSON Output Schema cleanly outside the call
+                    output_schema = {
+                        "type": "OBJECT",
+                        "properties": {
+                            "audit_status": {"type": "STRING"},
+                            "general_notes": {"type": "STRING"},
+                            "discrepancies": {
+                                "type": "ARRAY",
+                                "items": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "part_number": {"type": "STRING"},
+                                        "issue_type": {"type": "STRING"},
+                                        "drawing_details": {"type": "STRING"},
+                                        "erp_details": {"type": "STRING"},
+                                        "recommendation": {"type": "STRING"}
+                                    },
+                                    "required": ["part_number", "issue_type", "drawing_details", "erp_details", "recommendation"]
+                                }
+                            }
+                        },
+                        "required": ["audit_status", "discrepancies", "general_notes"]
+                    }
+
+                    # Execute API Request
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
                         contents=[
@@ -110,29 +134,8 @@ else:
                         ],
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
-                            response_schema={
-                                "type": "OBJECT",
-                                "properties": {
-                                    "audit_status": {"type": "STRING"},
-                                    "discrepancies": {
-                                        "type": "ARRAY",
-                                        "items": {
-                                            "type": "OBJECT",
-                                            "properties": {
-                                                "part_number": {"type": "STRING"},
-                                                "issue_type": {"type": "STRING"},
-                                                "drawing_details": {"type": "STRING"},
-                                                "erp_details": {"type": "STRING"},
-                                                "recommendation": {"type": "STRING"}
-                                            },
-                                            "required": ["part_number", "issue_type", "drawing_details", "erp_details", "recommendation"]
-                                        }
-                                    },
-                                    "general_notes": {"type": "STRING"}
-                                },
-                                "required": ["audit_status", "discrepancies", "general_notes"]
-                            }
-                        }
+                            response_schema=output_schema
+                        )
                     )
 
                     audit_result = json.loads(response.text)
