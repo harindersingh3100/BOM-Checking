@@ -75,7 +75,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_fil
 st.set_page_config(page_title="Categorized ERP BOM & Drawing Audit Agent", layout="wide")
 
 st.title("🛠️ Engineering BOM & Drawing Audit Agent")
-st.markdown("Multi-file, multi-page agent for cross-checking multiple PDF drawings against a single ERP CSV BOM.")
+st.markdown("Multi-file, multi-page agent for cross-checking multiple PDF drawings against a single ERP CSV BOM with strict Column Disambiguation.")
 
 # --- LOAD MEMORY DATA ---
 all_rules = load_rules()
@@ -142,7 +142,7 @@ stock_length_mm = st.sidebar.number_input(
 if not api_key:
     st.warning("Please enter your Gemini API Key in the sidebar to proceed.")
 else:
-    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-PDF File Upload Enabled | Stock Length: `{stock_length_mm} mm` | Active Normalizations: Variant Suffixes (-A/-B) & Cut-Lengths (-1000mm)")
+    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-PDF File Upload Enabled | Stock Length: `{stock_length_mm} mm` | Active Normalizations: Column Guard (ITEM vs QTY) + Variant Suffixes (-A/-B) & Cut-Lengths (-1000mm)")
 
     col1, col2 = st.columns(2)
     
@@ -219,6 +219,18 @@ else:
                     
                     CRITICAL MANDATORY PART CODE NORMALIZATION & MULTI-DRAWING AGGREGATION RULES:
                     
+                    0. STRICT TABLE COLUMN GUARD & DISAMBIGUATION (ITEM NO. vs QTY):
+                       - Engineering drawing tables have distinct columns: [ITEM / ITEM NO.] | [QTY / QUANTITY] | [PART NUMBER] | [DESCRIPTION].
+                       - 'ITEM' / 'ITEM NO.' is strictly the row index / serial position (e.g., Row 1, Row 2, ..., Row 16).
+                       - 'QTY' / 'QUANTITY' is the piece count required for that line item.
+                       - CRITICAL SAFETY MANDATE: NEVER use the 'ITEM' number as a quantity multiplier under any circumstances.
+                       - SANITY CHECK EXAMPLE:
+                         * Row line 16 has: ITEM = 16, QTY = 1, PART NUMBER = 'SF0000000236-1553'.
+                         * Quantity multiplier MUST be 1 (from QTY column).
+                         * Length calculation = 1553 mm x 1 = 1553 mm.
+                         * ABSOLUTELY BANNED: Multiplying 1553 mm x 16 (using ITEM 16).
+                       - Double check headers for every table column before parsing values.
+                    
                     1. AGGREGATE ACROSS ALL FILES & PAGES:
                        - Collect and consolidate all BOM table entries and balloon callouts from ALL provided drawing pages across ALL uploaded PDF files into a single master drawing inventory.
                     
@@ -230,16 +242,16 @@ else:
                     3. RULE B: CUT-LENGTH SUFFIX NORMALIZATION & {stock_length_mm}mm STOCK CONVERSION (Numeric Suffixes like -1000, -1500)
                        - Suffixes containing numbers (e.g., '-1000', '-1500', '-2500') represent cut lengths in millimeters (mm).
                        - Strip the length suffix to identify the Parent Part Code (e.g., 'SF0000000020-1000' -> Parent Code 'SF0000000020').
-                       - For each cut length entry across all drawings, calculate length contribution: (Cut Length in mm) x (Quantity).
+                       - For each cut length entry across all drawings, calculate length contribution: (Cut Length in mm) x (Quantity from QTY column ONLY).
                        - Sum ALL millimeter contributions for the same Parent Part Code across ALL files/pages to get TOTAL MILLIMETERS REQUIRED.
                        - CONVERT TO ERP STOCK PIECES:
                          * ERP BOM lists raw profiles in standard {stock_length_mm} mm stock lengths (Pieces).
                          * Calculate required stock pieces = ceil(TOTAL MILLIMETERS REQUIRED / {stock_length_mm}). Always round UP to the next whole integer.
                        - WORKED CALCULATION EXAMPLE (using {stock_length_mm} mm stock):
-                         * File 1 has 'SF0000000020-1000', Qty: 2 -> 1000 mm x 2 = 2000 mm
-                         * File 2 has 'SF0000000020-1500', Qty: 1 -> 1500 mm x 1 = 1500 mm
-                         * Total required length across files = 2000 + 1500 = 3500 mm
-                         * ERP Stock Pieces Required = ceil(3500 / {stock_length_mm}).
+                         * Item 16: 'SF0000000236-1553', Qty: 1 -> 1553 mm x 1 = 1553 mm (NOT 1553 x 16!)
+                         * Item 17: 'SF0000000236-1750', Qty: 1 -> 1750 mm x 1 = 1750 mm
+                         * Total required length for 'SF0000000236' = 1553 + 1750 = 3303 mm
+                         * ERP Stock Pieces Required = ceil(3303 / {stock_length_mm}) = ceil(3303 / 3000) = 2 pieces.
                     
                     4. RULE C: CONSOLIDATED BOM BLOCK / SUMMARY TABLE LOOKUP
                        - Check if any drawing page across the files contains an explicitly written 'Consolidated BOM', 'Summary Table', or 'Assembly BOM'.
@@ -249,17 +261,18 @@ else:
                        - Compare the consolidated calculated drawing quantity for each Parent Part Code against the corresponding Parent Part Code Qty in the single uploaded ERP BOM CSV.
                        - IF ERP BOM Qty matches the consolidated required quantity, mark as OK.
                        - IF THERE IS ANY VARIATION, IMMEDIATELY trigger an ALARM / DISCREPANCY.
-                       - In the discrepancy report, show the full multi-file math breakdown (e.g., "Drawings combined require 3500 mm [1000mm x2 + 1500mm x1] = ceil(3500/{stock_length_mm}) = required stock pcs vs ERP BOM Qty").
+                       - In the discrepancy report, show the full multi-file math breakdown (e.g., "Drawings combined require 3303 mm [1553mm x1 + 1750mm x1] = ceil(3303/{stock_length_mm}) = 2 stock pcs vs ERP BOM Qty: X").
                     
                     ERP BOM Data:
                     {erp_csv_text}
                     
                     Instructions:
                     1. Extract and aggregate all BOM items across ALL pages of ALL uploaded drawing files.
-                    2. Apply Rule A or Rule B normalization depending on suffix type.
-                    3. Compare consolidated parent totals against the single ERP BOM CSV.
-                    4. Check for missing parts, extra parts, or rule violations based on learned memory rules.
-                    5. Output a structured JSON response matching the required schema.
+                    2. STRICTLY ensure multipliers are taken ONLY from the 'QTY' column, NEVER the 'ITEM' column.
+                    3. Apply Rule A or Rule B normalization depending on suffix type.
+                    4. Compare consolidated parent totals against the single ERP BOM CSV.
+                    5. Check for missing parts, extra parts, or rule violations based on learned memory rules.
+                    6. Output a structured JSON response matching the required schema.
                     """
 
                     output_schema = {
