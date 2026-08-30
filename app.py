@@ -15,7 +15,6 @@ def load_rules():
             with open(RULES_FILE, "r") as f:
                 return json.load(f)
         except Exception:
-            # If file is empty or corrupted, fall back to empty list
             return []
     return []
 
@@ -69,8 +68,10 @@ else:
 
     if csv_file and pdf_file:
         erp_df = pd.read_csv(csv_file)
-        st.write("**Preview of Uploaded ERP BOM:**")
-        st.dataframe(erp_df.head())
+        
+        # Display full CSV data instead of restricting to 5 rows (.head())
+        st.write(f"**Uploaded ERP BOM Data ({len(erp_df)} total rows):**")
+        st.dataframe(erp_df, use_container_width=True)
 
         if st.button("Run Cross-Check Audit", type="primary"):
             with st.spinner("Agent is analyzing drawing, parsing BOM, and applying learned rules..."):
@@ -129,9 +130,9 @@ else:
                         "required": ["audit_status", "discrepancies", "general_notes"]
                     }
 
-                    # Execute API Request
+                    # Using standard supported gemini-1.5-flash model
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-1.5-flash',
                         contents=[
                             prompt,
                             types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
@@ -152,7 +153,7 @@ else:
                     if disc_list:
                         st.warning(f"Found {len(disc_list)} Discrepancies/Checks:")
                         disc_df = pd.DataFrame(disc_list)
-                        st.dataframe(disc_df)
+                        st.dataframe(disc_df, use_container_width=True)
                     else:
                         st.info("No discrepancies found between the drawing and the ERP BOM.")
 
