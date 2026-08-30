@@ -31,10 +31,10 @@ st.markdown("Interactive multi-device agent for cross-checking ERP CSV BOMs agai
 st.sidebar.header("1. Agent Configuration")
 api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
-# Models explicitly guaranteed to support generate_content + JSON Schema
+# Updated model options to current supported Flash/Pro models
 selected_model = st.sidebar.selectbox(
     "Select Gemini Model",
-    ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
+    ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-2.5-flash"],
     index=0
 )
 
@@ -136,7 +136,7 @@ else:
                         "required": ["audit_status", "discrepancies", "general_notes"]
                     }
 
-                    # Execute request with selected model
+                    # Execute request with selected active model
                     response = client.models.generate_content(
                         model=selected_model,
                         contents=[
