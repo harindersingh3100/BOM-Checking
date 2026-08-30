@@ -32,7 +32,7 @@ def save_rules(rules_dict):
     with open(RULES_FILE, "w") as f:
         json.dump(rules_dict, f, indent=4)
 
-def generate_excel_report(audit_result, disc_df, category, model_used):
+def generate_excel_report(audit_result, disc_df, category, model_used, total_pages):
     """Generates an in-memory Excel file with Summary and Discrepancies tabs."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -40,6 +40,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used):
         summary_data = {
             "Parameter": [
                 "Equipment Category",
+                "Total Drawing Pages Scanned",
                 "Audit Status",
                 "AI Model Used",
                 "Total Discrepancies Found",
@@ -47,6 +48,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used):
             ],
             "Details": [
                 category,
+                total_pages,
                 audit_result.get("audit_status", "N/A"),
                 model_used,
                 len(disc_df) if disc_df is not None else 0,
@@ -60,7 +62,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used):
         if disc_df is not None and not disc_df.empty:
             disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
         else:
-            no_disc_df = pd.DataFrame([{"Status": "No discrepancies found between ERP BOM and Drawing."}])
+            no_disc_df = pd.DataFrame([{"Status": "No discrepancies found. All part quantities and normalized specs match ERP BOM."}])
             no_disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
             
     output.seek(0)
@@ -69,7 +71,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used):
 st.set_page_config(page_title="Categorized ERP BOM & Drawing Audit Agent", layout="wide")
 
 st.title("🛠️ Engineering BOM & Drawing Audit Agent")
-st.markdown("Multi-category agent for cross-checking ERP CSV BOMs against drawing PDFs with category-specific learned rules.")
+st.markdown("Multi-page, multi-category agent for normalizing part numbers and cross-checking ERP CSV BOMs against multi-page drawing PDFs.")
 
 # --- LOAD MEMORY DATA ---
 all_rules = load_rules()
@@ -125,7 +127,7 @@ with st.sidebar.expander(f"🧠 Manage Rules for [{selected_category}]"):
 if not api_key:
     st.warning("Please enter your Gemini API Key in the sidebar to proceed.")
 else:
-    st.info(f"📌 **Active Audit Mode:** `Equipment Category: {selected_category}` | Active Rules: `{len(all_rules.get(selected_category, []))}` category rules, `{len(all_rules.get('General / Universal', []))}` universal rules.")
+    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-Page Auto-Scan Enabled | Automatic Part Code Normalization Active")
 
     col1, col2 = st.columns(2)
     
@@ -135,8 +137,7 @@ else:
         
     with col2:
         st.subheader("📐 Upload Drawing (.pdf)")
-        pdf_file = st.file_uploader("Upload Engineering Drawing PDF", type=["pdf"])
-        drawing_page_num = st.number_input("Target Drawing Page Number", min_value=1, value=2, step=1)
+        pdf_file = st.file_uploader("Upload Engineering Drawing PDF (All pages scanned automatically)", type=["pdf"])
 
     if csv_file and pdf_file:
         erp_df = pd.read_csv(csv_file)
@@ -144,15 +145,23 @@ else:
         st.write(f"**Uploaded ERP BOM Data ({len(erp_df)} total rows):**")
         st.dataframe(erp_df, use_container_width=True)
 
-        if st.button("Run Category-Specific Cross-Check Audit", type="primary"):
-            with st.spinner(f"Agent is analyzing {selected_category} drawing, parsing BOM, and applying active rules..."):
+        if st.button("Run Full Multi-Page Cross-Check Audit", type="primary"):
+            with st.spinner("Processing all PDF drawing pages, aggregating quantities, and performing normalization check..."):
                 try:
-                    # 1. Process PDF Page to Image
+                    # 1. Convert ALL PDF Pages to Image Parts
                     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-                    page = doc[drawing_page_num - 1]
-                    pix = page.get_pixmap(dpi=300)
-                    image_path = "temp_audit_page.png"
-                    pix.save(image_path)
+                    total_pages = len(doc)
+                    image_parts = []
+
+                    for page_num in range(total_pages):
+                        page = doc[page_num]
+                        pix = page.get_pixmap(dpi=300)
+                        img_bytes = pix.tobytes("png")
+                        image_parts.append(
+                            types.Part.from_bytes(data=img_bytes, mime_type="image/png")
+                        )
+
+                    st.info(f"📄 Successfully loaded {total_pages} drawing page(s) for audit.")
 
                     # 2. Compile Active Rules Context
                     universal_rules = all_rules.get("General / Universal", [])
@@ -169,27 +178,45 @@ else:
 
                     rules_context_str = "\n".join(combined_rules) if combined_rules else "None specified."
 
-                    # 3. Prepare API client & prompt
+                    # 3. Prepare API client & prompt with explicit Part Code Normalization instructions
                     client = genai.Client(api_key=api_key)
                     erp_csv_text = erp_df.to_csv(index=False)
 
                     prompt = f"""
                     You are an expert mechanical engineering AI auditor specializing in {selected_category} manufacturing systems.
-                    Your task is to cross-check the BOM extracted from the provided engineering drawing image against the provided ERP BOM CSV data.
+                    You are provided with all pages of an engineering drawing document and an ERP BOM CSV dataset.
                     
                     Equipment Category Being Audited: {selected_category}
                     
-                    Mandatory Rules to Strictly Follow for this Category:
+                    Mandatory Learned Memory Rules:
                     {rules_context_str}
+                    
+                    CRITICAL MANDATORY RULES FOR PART CODES & QUANTITIES:
+                    1. PART CODE NORMALIZATION:
+                       - Drawing part codes may contain variant/revision suffixes (e.g., '-A', '-B', '-C', etc., such as 'SF0000000001-A' or 'SF0000000001-B').
+                       - You MUST strip these variant suffixes to determine the Parent Part Code (e.g., 'SF0000000001-A' -> 'SF0000000001').
+                    
+                    2. MULTI-PAGE & VARIANT QUANTITY CONSOLIDATION:
+                       - Scan across ALL provided drawing pages.
+                       - Group ALL entries and variant entries sharing the same Parent Part Code and SUM their quantities together.
+                       - EXAMPLE: If drawing page 1 shows 'SF0000000001' (Qty: 5), 'SF0000000001-A' (Qty: 1), and page 2 shows 'SF0000000001-B' (Qty: 2), calculate the TOTAL Consolidated Drawing Quantity as 5 + 1 + 2 = 7 for Parent Code 'SF0000000001'.
+                    
+                    3. ERP CROSS-CHECK & ALARM TRIGGER:
+                       - Compare the Total Consolidated Drawing Quantity of the Parent Part Code against the corresponding Parent Part Code entry in the ERP BOM CSV.
+                       - In the ERP BOM CSV, parts are listed strictly under their Parent Part Code (e.g., 'SF0000000001').
+                       - IF ERP BOM Qty matches the Total Consolidated Drawing Qty (e.g., ERP Qty = 7), mark as OK.
+                       - IF THERE IS ANY VARIATION between the Total Consolidated Drawing Qty and the ERP BOM Qty, IMMEDIATELY raise an ALARM/DISCREPANCY.
+                       - When reporting a discrepancy, explicitly list the breakdown (e.g., "Drawing total is 7 [Base: 5, -A variant: 1, -B variant: 2] vs ERP BOM Qty: X").
                     
                     ERP BOM Data:
                     {erp_csv_text}
                     
                     Instructions:
-                    1. Extract the BOM table items (Qty, Part Number, Description, Material/Spec) from the drawing image.
-                    2. Compare them against the ERP BOM CSV data.
-                    3. Identify any mismatches in quantities, missing part numbers, extra items, or specific violations of the category rules provided above.
-                    4. Return a structured JSON response containing an array of discrepancies found, or a clear confirmation if everything matches perfectly.
+                    1. Extract all BOM items across ALL drawing pages.
+                    2. Apply Part Code Normalization and aggregate drawing quantities per Parent Part Code.
+                    3. Cross-check consolidated quantities against the ERP BOM CSV.
+                    4. Check for any missing parts, extra parts, or rule violations based on learned memory rules.
+                    5. Output a structured JSON response matching the required schema.
                     """
 
                     output_schema = {
@@ -215,7 +242,10 @@ else:
                         "required": ["audit_status", "discrepancies", "general_notes"]
                     }
 
-                    # Fallback Execution Loop
+                    # Construct API request contents: [prompt_text, page1_img, page2_img, ...]
+                    request_contents = [prompt] + image_parts
+
+                    # Fallback Execution Loop across models
                     candidate_models = [selected_model, "gemini-2.5-flash", "gemini-1.5-flash"]
                     candidate_models = list(dict.fromkeys(candidate_models))
 
@@ -227,10 +257,7 @@ else:
                         try:
                             response = client.models.generate_content(
                                 model=model_name,
-                                contents=[
-                                    prompt,
-                                    types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
-                                ],
+                                contents=request_contents,
                                 config=types.GenerateContentConfig(
                                     response_mime_type="application/json",
                                     response_schema=output_schema
@@ -253,7 +280,7 @@ else:
 
                     audit_result = json.loads(response.text)
                     
-                    st.success(f"Audit Complete for [{selected_category}]! (Executed with `{successful_model}`)")
+                    st.success(f"Audit Complete across all {total_pages} drawing page(s)! (Executed with `{successful_model}`)")
                     st.write(f"**Status:** {audit_result.get('audit_status')}")
                     st.write(f"**Notes:** {audit_result.get('general_notes')}")
                     
@@ -264,14 +291,14 @@ else:
                         st.warning(f"Found {len(disc_list)} Discrepancies/Checks:")
                         st.dataframe(disc_df, use_container_width=True)
                     else:
-                        st.info("No discrepancies found between the drawing and the ERP BOM.")
+                        st.info("No discrepancies found. All normalized quantities and drawing parts match the ERP BOM perfectly.")
 
                     # --- EXCEL DOWNLOAD BUTTON ---
-                    excel_data = generate_excel_report(audit_result, disc_df, selected_category, successful_model)
+                    excel_data = generate_excel_report(audit_result, disc_df, selected_category, successful_model, total_pages)
                     filename_cat = selected_category.lower().replace(" ", "_").replace("/", "_")
                     
                     st.download_button(
-                        label="📥 Download Audit Report (.xlsx)",
+                        label="📥 Download Consolidated Audit Report (.xlsx)",
                         data=excel_data,
                         file_name=f"audit_report_{filename_cat}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
