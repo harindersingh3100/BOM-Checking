@@ -31,29 +31,12 @@ st.markdown("Interactive multi-device agent for cross-checking ERP CSV BOMs agai
 st.sidebar.header("1. Agent Configuration")
 api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
-selected_model = None
-
-# Dynamically fetch available models for the provided API Key
-if api_key:
-    try:
-        client_init = genai.Client(api_key=api_key)
-        # Fetch available models for generateContent
-        available_models = []
-        for m in client_init.models.list():
-            model_id = m.name.replace("models/", "")
-            if "flash" in model_id or "pro" in model_id:
-                available_models.append(model_id)
-        
-        # Deduplicate and sort
-        available_models = sorted(list(set(available_models)))
-        
-        if available_models:
-            selected_model = st.sidebar.selectbox("Detected Models for your API Key", available_models)
-        else:
-            selected_model = st.sidebar.text_input("Model Name", value="gemini-2.0-flash")
-    except Exception as err:
-        st.sidebar.warning(f"Could not auto-detect models: {err}")
-        selected_model = st.sidebar.text_input("Model Name", value="gemini-2.0-flash")
+# Models explicitly guaranteed to support generate_content + JSON Schema
+selected_model = st.sidebar.selectbox(
+    "Select Gemini Model",
+    ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-pro"],
+    index=0
+)
 
 st.sidebar.header("2. Agent Memory (Learned Rules)")
 learned_rules = load_rules()
@@ -154,10 +137,8 @@ else:
                     }
 
                     # Execute request with selected model
-                    target_model = selected_model if selected_model else "gemini-2.0-flash"
-                    
                     response = client.models.generate_content(
-                        model=target_model,
+                        model=selected_model,
                         contents=[
                             prompt,
                             types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
@@ -170,7 +151,7 @@ else:
 
                     audit_result = json.loads(response.text)
                     
-                    st.success(f"Audit Complete! (Model used: `{target_model}`)")
+                    st.success(f"Audit Complete! (Model used: `{selected_model}`)")
                     st.write(f"**Status:** {audit_result.get('audit_status')}")
                     st.write(f"**Notes:** {audit_result.get('general_notes')}")
                     
