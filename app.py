@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 
 # --- PERSISTENT FILE STORAGE SETUP ---
-# Saves outside the git root folder so code updates don't wipe memory
+# Stores rules outside the codebase so app/code updates never erase them
 DATA_DIR = os.path.expanduser("~/.audit_agent")
 os.makedirs(DATA_DIR, exist_ok=True)
 RULES_FILE = os.path.join(DATA_DIR, "rules.json")
@@ -17,7 +17,7 @@ RULES_FILE = os.path.join(DATA_DIR, "rules.json")
 DEFAULT_CATEGORIES = ["General / Universal", "Oven", "Paint Booth", "Conveyors"]
 
 def load_rules():
-    """Loads rules from persistent storage location."""
+    """Loads rules dictionary permanently from local persistent storage."""
     if os.path.exists(RULES_FILE):
         try:
             with open(RULES_FILE, "r") as f:
@@ -32,7 +32,7 @@ def load_rules():
     return {cat: [] for cat in DEFAULT_CATEGORIES}
 
 def save_rules(rules_dict):
-    """Saves rules permanently to local persistent storage."""
+    """Saves rules permanently to disk."""
     with open(RULES_FILE, "w") as f:
         json.dump(rules_dict, f, indent=4)
 
@@ -78,8 +78,12 @@ st.set_page_config(page_title="Engineering ERP BOM & Drawing Audit Agent", layou
 
 st.title("🛠️ Engineering BOM & Drawing Audit Agent")
 
-# Load rules into state memory
+# Load rules into memory
 all_rules = load_rules()
+
+# Ensure active session category state exists
+if "active_category" not in st.session_state:
+    st.session_state["active_category"] = list(all_rules.keys())[0]
 
 # --- SIDEBAR CONFIGURATION ---
 st.sidebar.header("⚙️ Agent Settings")
@@ -101,9 +105,9 @@ stock_length_mm = st.sidebar.number_input(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"💾 **Rules Database Path:** `{RULES_FILE}`")
+st.sidebar.caption(f"💾 **Rules Storage Path:** `{RULES_FILE}`")
 
-# --- MAIN APP NAVIGATION TABS ---
+# --- MAIN NAVIGATION TABS ---
 tab_audit, tab_categories, tab_rules = st.tabs([
     "🔍 Run Cross-Check Audit", 
     "📁 Category Manager", 
@@ -111,18 +115,23 @@ tab_audit, tab_categories, tab_rules = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: RUN AUDIT
+# TAB 1: RUN CROSS-CHECK AUDIT
 # ==========================================
 with tab_audit:
     st.subheader("Run Multi-PDF Drawing vs ERP BOM Cross-Check")
     
     category_list = list(all_rules.keys())
-    selected_category = st.selectbox("Select Equipment Category for Audit", category_list)
+    selected_category = st.selectbox(
+        "Select Equipment Category for Audit", 
+        category_list, 
+        index=category_list.index(st.session_state["active_category"]) if st.session_state["active_category"] in category_list else 0,
+        key="audit_category_select"
+    )
 
     if not api_key:
         st.warning("Please enter your Gemini API Key in the sidebar to proceed.")
     else:
-        st.info(f"📌 **Active Category:** `{selected_category}` | **Stock Profile:** `{stock_length_mm} mm` | **Rules Applied:** `{len(all_rules.get(selected_category, []))} active rule(s)`")
+        st.info(f"📌 **Active Category:** `{selected_category}` | **Stock Profile:** `{stock_length_mm} mm` | **Active Rules:** `{len(all_rules.get(selected_category, []))} rule(s)`")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -153,7 +162,6 @@ with tab_audit:
                                     types.Part.from_bytes(data=pix.tobytes("png"), mime_type="image/png")
                                 )
 
-                        # Build prompt with rules context
                         universal_rules = all_rules.get("General / Universal", [])
                         category_rules = all_rules.get(selected_category, [])
                         combined_rules = []
@@ -255,16 +263,16 @@ with tab_audit:
                         st.error(f"Error executing audit: {e}")
 
 # ==========================================
-# TAB 2: CATEGORY MANAGER (ADD / DELETE)
+# TAB 2: CATEGORY MANAGER
 # ==========================================
 with tab_categories:
     st.subheader("📁 Equipment Category Management")
-    st.markdown("Add new categories or safely delete existing equipment categories.")
+    st.markdown("Add new categories or delete existing categories. All added categories will instantly reflect in the **Rules Check Table**.")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("### ➕ Add New Category")
+        st.markdown("### ➕ Add New Equipment Category")
         with st.form("add_category_form", clear_on_submit=True):
             new_cat_input = st.text_input("New Category Name", placeholder="e.g. Air Handling Unit")
             submit_add_cat = st.form_submit_button("Create Category", type="primary")
@@ -275,7 +283,8 @@ with tab_categories:
                     if clean_name not in all_rules:
                         all_rules[clean_name] = []
                         save_rules(all_rules)
-                        st.success(f"Category **'{clean_name}'** successfully created!")
+                        st.session_state["active_category"] = clean_name
+                        st.success(f"Category **'{clean_name}'** successfully created! It is now available in the Rules Check table.")
                         st.rerun()
                     else:
                         st.warning(f"Category '{clean_name}' already exists.")
@@ -283,95 +292,106 @@ with tab_categories:
                     st.error("Please enter a valid category name.")
 
     with col2:
-        st.markdown("### 🗑️ Delete Category")
+        st.markdown("### 🗑️ Delete Equipment Category")
         deletable_categories = [c for c in all_rules.keys() if c != "General / Universal"]
         
         if deletable_categories:
             selected_del_cat = st.selectbox("Select Category to Delete", deletable_categories)
             cat_rule_count = len(all_rules.get(selected_del_cat, []))
-            st.caption(f"Contains **{cat_rule_count}** rule(s).")
+            st.caption(f"Contains **{cat_rule_count}** active rule(s).")
 
             if st.button(f"Delete Category '{selected_del_cat}'", type="secondary"):
                 del all_rules[selected_del_cat]
                 save_rules(all_rules)
+                st.session_state["active_category"] = "General / Universal"
                 st.success(f"Category '{selected_del_cat}' deleted!")
                 st.rerun()
         else:
             st.info("No custom categories available to delete.")
 
 # ==========================================
-# TAB 3: RULES TABLE & EDITOR VIEW
+# TAB 3: CHECK RULES (DYNAMIC TABLE VIEW)
 # ==========================================
 with tab_rules:
     st.subheader("🧠 Category Rules Table & Editor")
-    st.markdown("View rules in structured tables, add custom rules, delete outdated rules, or backup your rule database.")
+    st.markdown("Select any category from the Category Manager to view, add, or delete its check rules in a structured table view.")
 
+    # DYNAMIC CATEGORY SELECTION LINKED DIRECTLY TO CATEGORY MANAGER
+    category_options = list(all_rules.keys())
+    
     selected_rule_cat = st.selectbox(
-        "Select Category to View & Edit Rules", 
-        list(all_rules.keys()),
+        "🏷️ Select Category from Category Manager:", 
+        category_options,
+        index=category_options.index(st.session_state["active_category"]) if st.session_state["active_category"] in category_options else 0,
         key="rules_tab_category_select"
     )
 
+    # Keep active session state in sync
+    st.session_state["active_category"] = selected_rule_cat
+
     cat_rules = all_rules.get(selected_rule_cat, [])
 
-    # Display Rules in Dataframe/Table View
-    st.markdown(f"#### Active Rules for `{selected_rule_cat}`")
+    # Display Category Status Badge
+    st.info(f"📋 **Viewing Category:** `{selected_rule_cat}` | **Total Check Rules Configured:** `{len(cat_rules)}`")
+
+    # Table View Rendering
+    st.markdown(f"#### Active Rules Table for `{selected_rule_cat}`")
     
     if cat_rules:
         rules_table_df = pd.DataFrame({
-            "Rule ID": range(1, len(cat_rules) + 1),
+            "Rule ID": [f"RULE-{i+1:02d}" for i in range(len(cat_rules))],
             "Equipment Category": selected_rule_cat,
             "Check Rule Description": cat_rules
         })
         st.dataframe(rules_table_df, use_container_width=True, hide_index=True)
 
         st.markdown("---")
-        st.markdown("#### 🗑️ Delete Selected Rules")
+        st.markdown(f"#### 🗑️ Delete Rules from `{selected_rule_cat}`")
         
-        # Multi-select dropdown to delete rules easily
+        # Multi-select dropdown to remove specific rules
         rules_to_delete = st.multiselect(
             "Select rule(s) to remove:",
             options=list(range(len(cat_rules))),
-            format_func=lambda idx: f"Rule #{idx+1}: {cat_rules[idx]}"
+            format_func=lambda idx: f"[{rules_table_df.iloc[idx]['Rule ID']}] {cat_rules[idx]}"
         )
 
         if st.button("Delete Selected Rule(s)", type="secondary"):
             if rules_to_delete:
-                # Remove selected rules by index in reverse order
                 for idx in sorted(rules_to_delete, reverse=True):
                     cat_rules.pop(idx)
                 all_rules[selected_rule_cat] = cat_rules
                 save_rules(all_rules)
-                st.success("Selected rules successfully removed!")
+                st.success("Selected rule(s) deleted!")
                 st.rerun()
             else:
                 st.warning("Please select at least one rule to delete.")
 
     else:
-        st.info(f"No check rules currently saved for **'{selected_rule_cat}'**.")
+        st.caption(f"No check rules currently saved for **'{selected_rule_cat}'**. Add one below to get started.")
 
     st.markdown("---")
-    st.markdown("#### ➕ Add New Rule")
+    st.markdown(f"#### ➕ Add New Check Rule to `{selected_rule_cat}`")
+    
     with st.form("add_rule_form", clear_on_submit=True):
         new_rule_text = st.text_area(
             f"Enter new rule for [{selected_rule_cat}]:",
-            placeholder="e.g. Ensure all galvanized flat panels use 1.2mm THK spec unless marked optional."
+            placeholder=f"e.g. Ensure all {selected_rule_cat} structural components check for profile thickness and mounting brackets."
         )
-        submit_rule = st.form_submit_button("Save Rule to Category", type="primary")
+        submit_rule = st.form_submit_button(f"Save Rule to '{selected_rule_cat}'", type="primary")
 
         if submit_rule:
             clean_rule = new_rule_text.strip()
             if clean_rule:
                 all_rules[selected_rule_cat].append(clean_rule)
                 save_rules(all_rules)
-                st.success("New rule added successfully!")
+                st.success(f"New rule saved to **'{selected_rule_cat}'**!")
                 st.rerun()
             else:
                 st.error("Rule description cannot be empty.")
 
     # --- BACKUP & RESTORE SECTION ---
     st.markdown("---")
-    st.markdown("### 💾 Rule Database Persistence & Backup Controls")
+    st.markdown("### 💾 Rule Database Persistence & Backup")
     
     b_col1, b_col2 = st.columns(2)
     
