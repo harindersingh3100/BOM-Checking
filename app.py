@@ -32,7 +32,7 @@ def save_rules(rules_dict):
     with open(RULES_FILE, "w") as f:
         json.dump(rules_dict, f, indent=4)
 
-def generate_excel_report(audit_result, disc_df, category, model_used, total_pages):
+def generate_excel_report(audit_result, disc_df, category, model_used, total_pages, stock_length_mm):
     """Generates an in-memory Excel file with Summary and Discrepancies tabs."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -40,6 +40,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
         summary_data = {
             "Parameter": [
                 "Equipment Category",
+                "Standard Stock Profile Length",
                 "Total Drawing Pages Scanned",
                 "Audit Status",
                 "AI Model Used",
@@ -48,6 +49,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
             ],
             "Details": [
                 category,
+                f"{stock_length_mm} mm",
                 total_pages,
                 audit_result.get("audit_status", "N/A"),
                 model_used,
@@ -62,7 +64,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
         if disc_df is not None and not disc_df.empty:
             disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
         else:
-            no_disc_df = pd.DataFrame([{"Status": "No discrepancies found. All part quantities and normalized specs match ERP BOM."}])
+            no_disc_df = pd.DataFrame([{"Status": "No discrepancies found. All normalized quantities and drawing specs match ERP BOM."}])
             no_disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
             
     output.seek(0)
@@ -71,7 +73,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_pag
 st.set_page_config(page_title="Categorized ERP BOM & Drawing Audit Agent", layout="wide")
 
 st.title("🛠️ Engineering BOM & Drawing Audit Agent")
-st.markdown("Multi-page, multi-category agent for normalizing part numbers and cross-checking ERP CSV BOMs against multi-page drawing PDFs.")
+st.markdown("Multi-page, multi-category agent with configurable stock profile lengths and dual normalization.")
 
 # --- LOAD MEMORY DATA ---
 all_rules = load_rules()
@@ -123,11 +125,22 @@ with st.sidebar.expander(f"🧠 Manage Rules for [{selected_category}]"):
     else:
         st.caption("No specific rules learned for this category yet.")
 
+st.sidebar.markdown("---")
+st.sidebar.header("3. Normalization Settings")
+stock_length_mm = st.sidebar.number_input(
+    "Standard Stock Profile Length (mm)",
+    min_value=500,
+    max_value=12000,
+    value=3000,
+    step=500,
+    help="Default raw material length (e.g., 3000mm, 6000mm) used to convert total cut length into ERP piece counts."
+)
+
 # --- MAIN APP INTERFACE ---
 if not api_key:
     st.warning("Please enter your Gemini API Key in the sidebar to proceed.")
 else:
-    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-Page Auto-Scan Enabled | Automatic Part Code Normalization Active")
+    st.info(f"📌 **Active Audit Mode:** `Category: {selected_category}` | Multi-Page Auto-Scan | Stock Conversion Basis: `{stock_length_mm} mm` | Active Normalizations: Variant Suffixes (-A/-B) & Cut-Lengths (-1000mm)")
 
     col1, col2 = st.columns(2)
     
@@ -146,7 +159,7 @@ else:
         st.dataframe(erp_df, use_container_width=True)
 
         if st.button("Run Full Multi-Page Cross-Check Audit", type="primary"):
-            with st.spinner("Processing all PDF drawing pages, aggregating quantities, and performing normalization check..."):
+            with st.spinner("Processing all PDF drawing pages, running normalization logic, and performing ERP audit..."):
                 try:
                     # 1. Convert ALL PDF Pages to Image Parts
                     doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
@@ -178,7 +191,7 @@ else:
 
                     rules_context_str = "\n".join(combined_rules) if combined_rules else "None specified."
 
-                    # 3. Prepare API client & prompt with explicit Part Code Normalization instructions
+                    # 3. Prepare API client & prompt with Dynamic Stock Length Suffix Normalization instructions
                     client = genai.Client(api_key=api_key)
                     erp_csv_text = erp_df.to_csv(index=False)
 
@@ -187,35 +200,50 @@ else:
                     You are provided with all pages of an engineering drawing document and an ERP BOM CSV dataset.
                     
                     Equipment Category Being Audited: {selected_category}
+                    Configured Standard Stock Length: {stock_length_mm} mm
                     
                     Mandatory Learned Memory Rules:
                     {rules_context_str}
                     
-                    CRITICAL MANDATORY RULES FOR PART CODES & QUANTITIES:
-                    1. PART CODE NORMALIZATION:
-                       - Drawing part codes may contain variant/revision suffixes (e.g., '-A', '-B', '-C', etc., such as 'SF0000000001-A' or 'SF0000000001-B').
-                       - You MUST strip these variant suffixes to determine the Parent Part Code (e.g., 'SF0000000001-A' -> 'SF0000000001').
+                    CRITICAL MANDATORY PART CODE NORMALIZATION & QUANTITY AUDIT RULES:
                     
-                    2. MULTI-PAGE & VARIANT QUANTITY CONSOLIDATION:
-                       - Scan across ALL provided drawing pages.
-                       - Group ALL entries and variant entries sharing the same Parent Part Code and SUM their quantities together.
-                       - EXAMPLE: If drawing page 1 shows 'SF0000000001' (Qty: 5), 'SF0000000001-A' (Qty: 1), and page 2 shows 'SF0000000001-B' (Qty: 2), calculate the TOTAL Consolidated Drawing Quantity as 5 + 1 + 2 = 7 for Parent Code 'SF0000000001'.
+                    RULE A: VARIANT SUFFIX NORMALIZATION (Letter Suffixes like -A, -B)
+                       - Suffixes containing letters (e.g., '-A', '-B', '-REV1') indicate variants or revisions.
+                       - Strip the variant suffix to find the Parent Part Code (e.g., 'SF0000000001-A' -> 'SF0000000001').
+                       - Sum the quantities directly across all drawing pages (e.g., Base Qty 5 + Variant-A Qty 1 + Variant-B Qty 2 = Total 7 pcs).
                     
-                    3. ERP CROSS-CHECK & ALARM TRIGGER:
-                       - Compare the Total Consolidated Drawing Quantity of the Parent Part Code against the corresponding Parent Part Code entry in the ERP BOM CSV.
-                       - In the ERP BOM CSV, parts are listed strictly under their Parent Part Code (e.g., 'SF0000000001').
-                       - IF ERP BOM Qty matches the Total Consolidated Drawing Qty (e.g., ERP Qty = 7), mark as OK.
-                       - IF THERE IS ANY VARIATION between the Total Consolidated Drawing Qty and the ERP BOM Qty, IMMEDIATELY raise an ALARM/DISCREPANCY.
-                       - When reporting a discrepancy, explicitly list the breakdown (e.g., "Drawing total is 7 [Base: 5, -A variant: 1, -B variant: 2] vs ERP BOM Qty: X").
+                    RULE B: CUT-LENGTH SUFFIX NORMALIZATION & {stock_length_mm}mm STOCK CONVERSION (Numeric Suffixes like -1000, -1500)
+                       - Suffixes containing numbers (e.g., '-1000', '-1500', '-2500') represent cut lengths in millimeters (mm).
+                       - Strip the length suffix to identify the Parent Part Code (e.g., 'SF0000000020-1000' -> Parent Code 'SF0000000020').
+                       - For each cut length entry, calculate length contribution: (Cut Length in mm) x (Quantity).
+                       - Sum ALL millimeter contributions for the same Parent Part Code across all pages to get TOTAL MILLIMETERS REQUIRED.
+                       - CONVERT TO ERP STOCK PIECES:
+                         * ERP BOM lists raw profiles in standard {stock_length_mm} mm stock lengths (Pieces).
+                         * Calculate required stock pieces = ceil(TOTAL MILLIMETERS REQUIRED / {stock_length_mm}). Always round UP to the next whole integer.
+                       - WORKED CALCULATION EXAMPLE (using {stock_length_mm} mm stock):
+                         * 'SF0000000020-1000', Qty: 2 -> 1000 mm x 2 = 2000 mm
+                         * 'SF0000000020-1500', Qty: 1 -> 1500 mm x 1 = 1500 mm
+                         * Total required length = 2000 + 1500 = 3500 mm
+                         * ERP Stock Pieces Required = ceil(3500 / {stock_length_mm}).
+                    
+                    RULE C: CONSOLIDATED BOM BLOCK / SUMMARY TABLE LOOKUP
+                       - Check if any drawing page contains an explicitly written 'Consolidated BOM', 'Summary Table', or 'Assembly BOM'.
+                       - Cross-verify your calculated parent quantities against any summary table present on the drawing.
+                    
+                    ERP AUDIT & ALARM TRIGGER:
+                       - Compare the normalized calculated drawing quantity (from Rule A or Rule B) against the Parent Part Code Qty in the ERP BOM CSV.
+                       - IF ERP BOM Qty matches the calculated required quantity, mark as OK.
+                       - IF THERE IS ANY VARIATION, IMMEDIATELY trigger an ALARM / DISCREPANCY.
+                       - In the discrepancy report, show the full math breakdown (e.g., "Drawing requires 3500 mm [1000mm x2 + 1500mm x1] = ceil(3500/{stock_length_mm}) = required stock pcs vs ERP BOM Qty").
                     
                     ERP BOM Data:
                     {erp_csv_text}
                     
                     Instructions:
                     1. Extract all BOM items across ALL drawing pages.
-                    2. Apply Part Code Normalization and aggregate drawing quantities per Parent Part Code.
-                    3. Cross-check consolidated quantities against the ERP BOM CSV.
-                    4. Check for any missing parts, extra parts, or rule violations based on learned memory rules.
+                    2. Apply Rule A or Rule B normalization depending on whether the suffix is a letter variant or a numeric cut-length.
+                    3. Compare calculated parent totals against the ERP BOM CSV.
+                    4. Check for missing parts, extra parts, or rule violations based on learned memory rules.
                     5. Output a structured JSON response matching the required schema.
                     """
 
@@ -242,7 +270,6 @@ else:
                         "required": ["audit_status", "discrepancies", "general_notes"]
                     }
 
-                    # Construct API request contents: [prompt_text, page1_img, page2_img, ...]
                     request_contents = [prompt] + image_parts
 
                     # Fallback Execution Loop across models
@@ -291,10 +318,10 @@ else:
                         st.warning(f"Found {len(disc_list)} Discrepancies/Checks:")
                         st.dataframe(disc_df, use_container_width=True)
                     else:
-                        st.info("No discrepancies found. All normalized quantities and drawing parts match the ERP BOM perfectly.")
+                        st.info("No discrepancies found. All normalized quantities, stock lengths, and drawing parts match the ERP BOM perfectly.")
 
                     # --- EXCEL DOWNLOAD BUTTON ---
-                    excel_data = generate_excel_report(audit_result, disc_df, selected_category, successful_model, total_pages)
+                    excel_data = generate_excel_report(audit_result, disc_df, selected_category, successful_model, total_pages, stock_length_mm)
                     filename_cat = selected_category.lower().replace(" ", "_").replace("/", "_")
                     
                     st.download_button(
