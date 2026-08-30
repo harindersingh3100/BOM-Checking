@@ -9,7 +9,6 @@ from google import genai
 from google.genai import types
 
 # --- PERSISTENT FILE STORAGE SETUP ---
-# Stores rules outside the codebase so app/code updates never erase them
 DATA_DIR = os.path.expanduser("~/.audit_agent")
 os.makedirs(DATA_DIR, exist_ok=True)
 RULES_FILE = os.path.join(DATA_DIR, "rules.json")
@@ -74,11 +73,158 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_fil
     output.seek(0)
     return output
 
-st.set_page_config(page_title="Engineering ERP BOM & Drawing Audit Agent", layout="wide")
+st.set_page_config(
+    page_title="Engineering ERP BOM & Drawing Audit Agent", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("🛠️ Engineering BOM & Drawing Audit Agent")
+# ==========================================
+# FUTURISTIC AQUA THEME CUSTOM CSS
+# ==========================================
+st.markdown("""
+<style>
+/* Futuristic Dark Aqua Canvas */
+.stApp {
+    background: linear-gradient(135deg, #070e17 0%, #0d1b2a 50%, #0a192f 100%);
+    color: #e2e8f0;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
 
-# Load rules into memory
+/* Page Layout Container Width */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+    max-width: 1280px;
+}
+
+/* Futuristic Neon Aqua Headers */
+h1 {
+    color: #00f2fe !important;
+    font-weight: 800 !important;
+    text-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+    letter-spacing: -0.5px;
+}
+
+h2, h3, h4 {
+    color: #e0f2fe !important;
+    font-weight: 600 !important;
+}
+
+/* Glassmorphic Form Cards & Panels */
+.stForm, div[data-testid="stExpander"] {
+    background: rgba(15, 28, 47, 0.65) !important;
+    border: 1px solid rgba(0, 242, 254, 0.25) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    backdrop-filter: blur(10px);
+    border-radius: 14px !important;
+    padding: 1.5rem;
+}
+
+/* Tab Bar - Glowing Futuristic Pills */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 12px;
+    background: rgba(13, 27, 42, 0.8);
+    padding: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 242, 254, 0.15);
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 48px;
+    background-color: transparent;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-weight: 600;
+    padding: 0 22px;
+    transition: all 0.3s ease;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, rgba(0, 242, 254, 0.25) 0%, rgba(79, 172, 254, 0.25) 100%) !important;
+    color: #00f2fe !important;
+    border: 1px solid rgba(0, 242, 254, 0.5) !important;
+    box-shadow: 0 0 15px rgba(0, 242, 254, 0.25);
+}
+
+/* Glowing Cyber Action Buttons */
+.stButton > button[kind="primary"], div.stForm button[kind="primary"] {
+    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%) !important;
+    color: #050b14 !important;
+    font-weight: 700 !important;
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 0.6rem 1.6rem !important;
+    box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+    transition: all 0.3s ease !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 30px rgba(0, 242, 254, 0.7) !important;
+}
+
+/* Secondary Buttons */
+.stButton > button[kind="secondary"] {
+    background: rgba(15, 28, 47, 0.8) !important;
+    color: #00f2fe !important;
+    border: 1px solid rgba(0, 242, 254, 0.4) !important;
+    border-radius: 10px !important;
+    transition: all 0.3s ease !important;
+}
+
+.stButton > button[kind="secondary"]:hover {
+    background: rgba(0, 242, 254, 0.15) !important;
+    border-color: #00f2fe !important;
+}
+
+/* Sidebar Styling */
+section[data-testid="stSidebar"] {
+    background-color: #050b14 !important;
+    border-right: 1px solid rgba(0, 242, 254, 0.15);
+}
+
+/* Inputs & Form Elements */
+.stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input, .stTextArea textarea {
+    background-color: rgba(10, 25, 47, 0.8) !important;
+    color: #f1f5f9 !important;
+    border: 1px solid rgba(0, 242, 254, 0.3) !important;
+    border-radius: 8px !important;
+}
+
+.stTextInput input:focus, .stTextArea textarea:focus {
+    border-color: #00f2fe !important;
+    box-shadow: 0 0 12px rgba(0, 242, 254, 0.3) !important;
+}
+
+/* Dynamic Alert Cards */
+div.stAlert {
+    background: rgba(10, 25, 47, 0.85) !important;
+    border: 1px solid rgba(0, 242, 254, 0.3) !important;
+    border-radius: 10px !important;
+    color: #e0f2fe !important;
+}
+
+/* Glassmorphic Data Table Wrapper */
+[data-testid="stDataFrame"] {
+    border: 1px solid rgba(0, 242, 254, 0.25);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* File Upload Glass Boxes */
+[data-testid="stFileUploadDropzone"] {
+    background: rgba(15, 28, 47, 0.5) !important;
+    border: 1.5px dashed rgba(0, 242, 254, 0.4) !important;
+    border-radius: 12px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("⚡ Engineering BOM & Drawing Audit Agent")
+
+# Load persistent rules memory
 all_rules = load_rules()
 
 # Ensure active session category state exists
@@ -86,7 +232,7 @@ if "active_category" not in st.session_state:
     st.session_state["active_category"] = list(all_rules.keys())[0]
 
 # --- SIDEBAR CONFIGURATION ---
-st.sidebar.header("⚙️ Agent Settings")
+st.sidebar.markdown("### ⚙️ Engine Settings")
 api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
 selected_model = st.sidebar.selectbox(
@@ -105,7 +251,7 @@ stock_length_mm = st.sidebar.number_input(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"💾 **Rules Storage Path:** `{RULES_FILE}`")
+st.sidebar.caption(f"💾 **Rules Database Storage:**\n`{RULES_FILE}`")
 
 # --- MAIN NAVIGATION TABS ---
 tab_audit, tab_categories, tab_rules = st.tabs([
@@ -316,7 +462,6 @@ with tab_rules:
     st.subheader("🧠 Category Rules Table & Editor")
     st.markdown("Select any category from the Category Manager to view, add, or delete its check rules in a structured table view.")
 
-    # DYNAMIC CATEGORY SELECTION LINKED DIRECTLY TO CATEGORY MANAGER
     category_options = list(all_rules.keys())
     
     selected_rule_cat = st.selectbox(
@@ -326,15 +471,11 @@ with tab_rules:
         key="rules_tab_category_select"
     )
 
-    # Keep active session state in sync
     st.session_state["active_category"] = selected_rule_cat
-
     cat_rules = all_rules.get(selected_rule_cat, [])
 
-    # Display Category Status Badge
     st.info(f"📋 **Viewing Category:** `{selected_rule_cat}` | **Total Check Rules Configured:** `{len(cat_rules)}`")
 
-    # Table View Rendering
     st.markdown(f"#### Active Rules Table for `{selected_rule_cat}`")
     
     if cat_rules:
@@ -348,7 +489,6 @@ with tab_rules:
         st.markdown("---")
         st.markdown(f"#### 🗑️ Delete Rules from `{selected_rule_cat}`")
         
-        # Multi-select dropdown to remove specific rules
         rules_to_delete = st.multiselect(
             "Select rule(s) to remove:",
             options=list(range(len(cat_rules))),
