@@ -31,6 +31,13 @@ st.markdown("Interactive multi-device agent for cross-checking ERP CSV BOMs agai
 st.sidebar.header("1. Agent Configuration")
 api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
+# Model selector dropdown
+selected_model = st.sidebar.selectbox(
+    "Select Preferred Gemini Model",
+    ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
+    index=0
+)
+
 st.sidebar.header("2. Agent Memory (Learned Rules)")
 learned_rules = load_rules()
 
@@ -69,7 +76,6 @@ else:
     if csv_file and pdf_file:
         erp_df = pd.read_csv(csv_file)
         
-        # Display full CSV data instead of restricting to 5 rows (.head())
         st.write(f"**Uploaded ERP BOM Data ({len(erp_df)} total rows):**")
         st.dataframe(erp_df, use_container_width=True)
 
@@ -130,18 +136,34 @@ else:
                         "required": ["audit_status", "discrepancies", "general_notes"]
                     }
 
-                    # Using standard supported gemini-1.5-flash model
-                    response = client.models.generate_content(
-                        model='gemini-1.5-flash',
-                        contents=[
-                            prompt,
-                            types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
-                        ],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=output_schema
-                        )
-                    )
+                    # List of models to try in sequence
+                    models_to_try = list(dict.fromkeys([selected_model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]))
+
+                    response = None
+                    last_error = None
+
+                    # Try each model until one succeeds
+                    for model_name in models_to_try:
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    prompt,
+                                    types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
+                                ],
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    response_schema=output_schema
+                                )
+                            )
+                            st.info(f"Processed successfully using model: `{model_name}`")
+                            break
+                        except Exception as err:
+                            last_error = err
+                            continue
+
+                    if response is None:
+                        raise last_error
 
                     audit_result = json.loads(response.text)
                     
