@@ -11,8 +11,12 @@ RULES_FILE = "rules.json"
 
 def load_rules():
     if os.path.exists(RULES_FILE):
-        with open(RULES_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(RULES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            # If file is empty or corrupted, fall back to empty list
+            return []
     return []
 
 def save_rules(rules):
@@ -101,7 +105,7 @@ else:
                     4. Return a structured JSON response containing an array of discrepancies found, or a statement if everything matches perfectly.
                     """
 
-                    # Define the JSON Output Schema cleanly outside the call
+                    # Output Schema
                     output_schema = {
                         "type": "OBJECT",
                         "properties": {
