@@ -3,6 +3,7 @@ import pandas as pd
 import pymupdf as fitz
 import json
 import os
+import time
 from google import genai
 from google.genai import types
 
@@ -31,10 +32,9 @@ st.markdown("Interactive multi-device agent for cross-checking ERP CSV BOMs agai
 st.sidebar.header("1. Agent Configuration")
 api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
-# Updated model options to current supported Flash/Pro models
 selected_model = st.sidebar.selectbox(
-    "Select Gemini Model",
-    ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-2.5-flash"],
+    "Preferred Gemini Model",
+    ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-1.5-flash"],
     index=0
 )
 
@@ -112,7 +112,6 @@ else:
                     4. Return a structured JSON response containing an array of discrepancies found, or a statement if everything matches perfectly.
                     """
 
-                    # Output Schema
                     output_schema = {
                         "type": "OBJECT",
                         "properties": {
@@ -136,22 +135,47 @@ else:
                         "required": ["audit_status", "discrepancies", "general_notes"]
                     }
 
-                    # Execute request with selected active model
-                    response = client.models.generate_content(
-                        model=selected_model,
-                        contents=[
-                            prompt,
-                            types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
-                        ],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=output_schema
-                        )
-                    )
+                    # 3. Fallback Model List
+                    candidate_models = [selected_model, "gemini-2.5-flash", "gemini-1.5-flash"]
+                    # Remove duplicates while preserving priority order
+                    candidate_models = list(dict.fromkeys(candidate_models))
+
+                    response = None
+                    successful_model = None
+                    last_error = None
+
+                    # Execution loop with automatic fallback
+                    for model_name in candidate_models:
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=[
+                                    prompt,
+                                    types.Part.from_bytes(data=open(image_path, "rb").read(), mime_type="image/png")
+                                ],
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    response_schema=output_schema
+                                )
+                            )
+                            successful_model = model_name
+                            break
+                        except Exception as err:
+                            last_error = err
+                            err_msg = str(err)
+                            if "503" in err_msg or "UNAVAILABLE" in err_msg:
+                                st.warning(f"Model `{model_name}` is experiencing high traffic (503). Retrying automatically with backup model...")
+                                time.sleep(1)
+                                continue
+                            else:
+                                raise err
+
+                    if response is None:
+                        raise last_error
 
                     audit_result = json.loads(response.text)
                     
-                    st.success(f"Audit Complete! (Model used: `{selected_model}`)")
+                    st.success(f"Audit Complete! (Executed with `{successful_model}`)")
                     st.write(f"**Status:** {audit_result.get('audit_status')}")
                     st.write(f"**Notes:** {audit_result.get('general_notes')}")
                     
