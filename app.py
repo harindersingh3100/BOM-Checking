@@ -98,7 +98,7 @@ st.markdown("""
     max-width: 1280px;
 }
 
-/* Deep Ocean Blue Headers (No Neon) */
+/* Deep Ocean Blue Headers */
 h1 {
     color: #1b4f72 !important;
     font-weight: 700 !important;
@@ -280,13 +280,28 @@ with tab_audit:
 
         col1, col2 = st.columns(2)
         with col1:
-            csv_file = st.file_uploader("Upload ERP BOM CSV File", type=["csv"])
+            # ALLOWS EXCEL (.xlsx, .xls) AND CSV FILES DIRECTLY
+            bom_file = st.file_uploader("Upload ERP BOM File (Excel or CSV)", type=["xlsx", "xls", "csv"])
         with col2:
             pdf_files = st.file_uploader("Upload Drawing PDF Files", type=["pdf"], accept_multiple_files=True)
 
-        if csv_file and pdf_files:
-            erp_df = pd.read_csv(csv_file)
-            st.write(f"**ERP BOM Data Preview ({len(erp_df)} items):**")
+        if bom_file and pdf_files:
+            # SAFE FILE READER (EXCEL + CSV WITH UNICODE FALLBACK)
+            try:
+                file_name = bom_file.name.lower()
+                if file_name.endswith(('.xlsx', '.xls')):
+                    erp_df = pd.read_excel(bom_file)
+                else:
+                    try:
+                        erp_df = pd.read_csv(bom_file, encoding='utf-8')
+                    except UnicodeDecodeError:
+                        bom_file.seek(0)
+                        erp_df = pd.read_csv(bom_file, encoding='latin1')
+            except Exception as e:
+                st.error(f"Error reading ERP BOM file: {e}")
+                st.stop()
+
+            st.write(f"**ERP BOM Data Preview ({len(erp_df)} items loaded):**")
             st.dataframe(erp_df, use_container_width=True)
 
             if st.button("Run Full Multi-PDF Audit", type="primary"):
@@ -322,7 +337,7 @@ with tab_audit:
 
                         prompt = f"""
                         You are an expert mechanical engineering AI auditor specializing in {selected_category} manufacturing systems.
-                        Cross-check provided PDF drawings against the ERP BOM CSV data.
+                        Cross-check provided PDF drawings against the ERP BOM data.
                         
                         Equipment Category: {selected_category}
                         Standard Stock Profile Length: {stock_length_mm} mm
