@@ -1,9 +1,9 @@
-import streamlit as st
-import pandas as pd
-import pymupdf as fitz
 import json
 import os
 import io
+import streamlit as st
+import pandas as pd
+import pymupdf as fitz
 from google import genai
 from google.genai import types
 
@@ -143,9 +143,12 @@ api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
 selected_model = st.sidebar.selectbox(
     "Preferred Gemini Model",
-    ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"],
+    ["gemini-3.6-flash", "gemini-3-flash", "Custom Model Name"],
     index=0
 )
+
+if selected_model == "Custom Model Name":
+    selected_model = st.sidebar.text_input("Enter Custom Model Identifier", value="gemini-3.6-flash")
 
 stock_length_mm = st.sidebar.number_input(
     "Standard Stock Profile Length (mm)",
