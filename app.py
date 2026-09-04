@@ -143,7 +143,7 @@ api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
 selected_model = st.sidebar.selectbox(
     "Preferred Gemini Model",
-    ["gemini-2.5-flash", "gemini-1.5-flash"],
+    ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"],
     index=0
 )
 
@@ -236,7 +236,6 @@ with tab_audit:
                         rules_context_str = "\n".join(combined_rules) if combined_rules else "None specified."
                         client = genai.Client(api_key=api_key)
 
-                        # PROMPT INCLUDES DESCRIPTION MATCHING LOGIC
                         prompt = f"""
                         You are an expert mechanical engineering AI auditor specializing in {selected_category} manufacturing systems.
                         Perform a strict BI-DIRECTIONAL (TWO-WAY) AUDIT comparing the provided PDF drawings against the ERP BOM data.
