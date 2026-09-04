@@ -73,7 +73,7 @@ def generate_excel_report(audit_result, disc_df, master_df, category, model_used
             no_disc_df = pd.DataFrame([{"Status": "No discrepancies found. All quantities, descriptions, and drawing specs match ERP BOM bi-directionally."}])
             no_disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
 
-        # TAB 3: FULL MASTER RECONCILIATION (ALL ITEMS DRAWING VS ERP)
+        # TAB 3: FULL MASTER RECONCILIATION
         if master_df is not None and not master_df.empty:
             master_df.to_excel(writer, sheet_name="Full Master Reconciliation", index=False)
             
@@ -249,27 +249,25 @@ with tab_audit:
 
                         prompt = f"""
                         You are an expert mechanical engineering AI auditor specializing in {selected_category} manufacturing systems.
-                        Perform a strict BI-DIRECTIONAL (TWO-WAY) AUDIT comparing the provided PDF drawings against the ERP BOM data.
+                        Perform a strict, deterministic BI-DIRECTIONAL (TWO-WAY) AUDIT comparing the provided PDF drawings against the ERP BOM data.
                         
                         Equipment Category: {selected_category}
                         Standard Stock Profile Length: {stock_length_mm} mm
                         Learned Rules:
                         {rules_context_str}
                         
+                        DETERMINISTIC PROCESSING & SORTING INSTRUCTIONS:
+                        1. SCAN ORDER: Scan drawing tables systematically from top-to-bottom and left-to-right.
+                        2. OUTPUT SORTING: Sort BOTH the `master_parts_list` and `discrepancies` arrays in strictly ascending alphabetical order by `part_number`.
+                        
                         CRITICAL AUDIT INSTRUCTIONS:
                         1. MASTER RECONCILIATION LIST (`master_parts_list`):
-                           - You MUST build a complete, itemized row-by-row reconciliation table for EVERY SINGLE unique part code present in either the drawing set or the ERP BOM.
-                           - For each part, include:
-                             - `part_number`: Clean part code/number.
-                             - `drawing_description`: Description as stated on the PDF drawing (or "N/A - Not on drawing").
-                             - `drawing_quantity`: Total aggregated quantity extracted from PDF drawings (or "0").
-                             - `erp_description`: Description from ERP BOM (or "N/A - Not in ERP").
-                             - `erp_quantity`: Quantity from ERP BOM (or "0").
-                             - `status`: Exactly one of ["MATCH", "QUANTITY_MISMATCH", "DESCRIPTION_MISMATCH", "MISSING_IN_DRAWING", "MISSING_IN_ERP"].
-                             - `notes`: Specific verification comments (e.g. "Matching", "ERP description says SS304 but drawing says MS", "Drawing total Qty=4, ERP Qty=2").
+                           - Build a complete, itemized row-by-row reconciliation table for EVERY SINGLE unique part code present in either the drawing set or the ERP BOM.
+                           - Include: `part_number`, `drawing_description`, `drawing_quantity`, `erp_description`, `erp_quantity`, `status`, `notes`.
+                           - `status` MUST be one of: ["MATCH", "QUANTITY_MISMATCH", "DESCRIPTION_MISMATCH", "MISSING_IN_DRAWING", "MISSING_IN_ERP"].
 
                         2. DISCREPANCIES TABLE (`discrepancies`):
-                           - Filter out all items that have `status != "MATCH"` and populate the `discrepancies` array with clear recommendations.
+                           - Include all items where `status != "MATCH"`. Provide clear recommendations.
 
                         3. STRICT TABLE COLUMN GUARD:
                            - Engineering tables on drawings have distinct columns: [ITEM / ITEM NO.] | [QTY / QUANTITY] | [PART NUMBER] | [DESCRIPTION].
@@ -325,17 +323,19 @@ with tab_audit:
                             "required": ["audit_status", "master_parts_list", "discrepancies", "general_notes"]
                         }
 
+                        # Temperature set to 0.0 forces greedy deterministic output across repeat executions
                         response = client.models.generate_content(
                             model=selected_model,
                             contents=[prompt] + image_parts,
                             config=types.GenerateContentConfig(
+                                temperature=0.0,
                                 response_mime_type="application/json",
                                 response_schema=output_schema
                             )
                         )
 
                         audit_result = json.loads(response.text)
-                        st.success(f"Audit Complete! Executed with model `{selected_model}`.")
+                        st.success(f"Audit Complete! Executed with model `{selected_model}` (Deterministic Mode: Temp=0.0).")
                         st.write(f"**Status:** {audit_result.get('audit_status')}")
                         st.write(f"**Notes:** {audit_result.get('general_notes')}")
                         
@@ -345,14 +345,17 @@ with tab_audit:
                         disc_df = pd.DataFrame(disc_list) if disc_list else None
                         master_df = pd.DataFrame(master_list) if master_list else None
 
-                        # Display Discrepancies
+                        # Python-level secondary sorting to enforce exact identical UI ordering
+                        if master_df is not None and not master_df.empty:
+                            master_df = master_df.sort_values(by="part_number").reset_index(drop=True)
+
                         if disc_df is not None and not disc_df.empty:
+                            disc_df = disc_df.sort_values(by="part_number").reset_index(drop=True)
                             st.warning(f"Found {len(disc_list)} Discrepancies:")
                             st.dataframe(disc_df, use_container_width=True)
                         else:
                             st.info("No discrepancies found. ERP BOM perfectly matches drawings bi-directionally.")
 
-                        # Display Full Itemized Master List
                         if master_df is not None and not master_df.empty:
                             with st.expander(f"📋 View Full Master Reconciliation Table ({len(master_df)} total items cross-checked)", expanded=True):
                                 st.dataframe(master_df, use_container_width=True)
