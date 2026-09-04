@@ -34,10 +34,11 @@ def save_rules(rules_dict):
     with open(RULES_FILE, "w") as f:
         json.dump(rules_dict, f, indent=4)
 
-def generate_excel_report(audit_result, disc_df, category, model_used, total_files, total_pages, stock_length_mm):
-    """Generates an in-memory Excel file with Summary and Discrepancies tabs."""
+def generate_excel_report(audit_result, disc_df, master_df, category, model_used, total_files, total_pages, stock_length_mm):
+    """Generates an in-memory Excel file with Summary, Discrepancies, and Full Master Reconciliation tabs."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # TAB 1: SUMMARY
         summary_data = {
             "Parameter": [
                 "Equipment Category",
@@ -47,6 +48,7 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_fil
                 "Audit Status",
                 "AI Model Used",
                 "Total Discrepancies Found",
+                "Total Scanned Line Items",
                 "General Audit Notes"
             ],
             "Details": [
@@ -57,17 +59,23 @@ def generate_excel_report(audit_result, disc_df, category, model_used, total_fil
                 audit_result.get("audit_status", "N/A"),
                 model_used,
                 len(disc_df) if disc_df is not None else 0,
+                len(master_df) if master_df is not None else 0,
                 audit_result.get("general_notes", "")
             ]
         }
         summary_df = pd.DataFrame(summary_data)
         summary_df.to_excel(writer, sheet_name="Audit Summary", index=False)
         
+        # TAB 2: DISCREPANCIES ONLY
         if disc_df is not None and not disc_df.empty:
             disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
         else:
             no_disc_df = pd.DataFrame([{"Status": "No discrepancies found. All quantities, descriptions, and drawing specs match ERP BOM bi-directionally."}])
             no_disc_df.to_excel(writer, sheet_name="Discrepancies", index=False)
+
+        # TAB 3: FULL MASTER RECONCILIATION (ALL ITEMS DRAWING VS ERP)
+        if master_df is not None and not master_df.empty:
+            master_df.to_excel(writer, sheet_name="Full Master Reconciliation", index=False)
             
     output.seek(0)
     return output
@@ -248,43 +256,29 @@ with tab_audit:
                         Learned Rules:
                         {rules_context_str}
                         
-                        CRITICAL AUDIT RULES:
-                        0. STRICT TABLE COLUMN GUARD:
+                        CRITICAL AUDIT INSTRUCTIONS:
+                        1. MASTER RECONCILIATION LIST (`master_parts_list`):
+                           - You MUST build a complete, itemized row-by-row reconciliation table for EVERY SINGLE unique part code present in either the drawing set or the ERP BOM.
+                           - For each part, include:
+                             - `part_number`: Clean part code/number.
+                             - `drawing_description`: Description as stated on the PDF drawing (or "N/A - Not on drawing").
+                             - `drawing_quantity`: Total aggregated quantity extracted from PDF drawings (or "0").
+                             - `erp_description`: Description from ERP BOM (or "N/A - Not in ERP").
+                             - `erp_quantity`: Quantity from ERP BOM (or "0").
+                             - `status`: Exactly one of ["MATCH", "QUANTITY_MISMATCH", "DESCRIPTION_MISMATCH", "MISSING_IN_DRAWING", "MISSING_IN_ERP"].
+                             - `notes`: Specific verification comments (e.g. "Matching", "ERP description says SS304 but drawing says MS", "Drawing total Qty=4, ERP Qty=2").
+
+                        2. DISCREPANCIES TABLE (`discrepancies`):
+                           - Filter out all items that have `status != "MATCH"` and populate the `discrepancies` array with clear recommendations.
+
+                        3. STRICT TABLE COLUMN GUARD:
                            - Engineering tables on drawings have distinct columns: [ITEM / ITEM NO.] | [QTY / QUANTITY] | [PART NUMBER] | [DESCRIPTION].
                            - 'ITEM' is purely the row index. 'QTY' is the quantity multiplier.
                            - NEVER use 'ITEM' index as a quantity multiplier!
-                        
-                        1. DRAWING AGGREGATION:
-                           - Build a master list of all parts, descriptions, and quantities visually visible across all uploaded PDF pages.
-                        
-                        2. MANDATORY REVERSE CHECK (ERP BOM -> DRAWINGS):
-                           - Iterate through EVERY SINGLE line item present in the ERP BOM table below.
-                           - Check if that part number or description appears in any of the PDF drawings.
-                           - IF AN ITEM IS LISTED IN THE ERP BOM BUT IS MISSING FROM ALL DRAWINGS, flag it as a discrepancy!
-                             - `part_number`: Use the ERP Part Number.
-                             - `issue_type`: "Missing in Drawing (In ERP Only)".
-                             - `drawing_details`: "Item not found on any uploaded PDF drawing page."
-                             - `erp_details`: State ERP Description & Qty.
-                             - `recommendation`: "Verify if drawing is missing from upload set or if item should be removed from ERP BOM."
 
-                        3. FORWARD CHECK (DRAWINGS -> ERP BOM):
-                           - IF AN ITEM APPEARS ON A DRAWING BUT IS MISSING FROM THE ERP BOM:
-                             - `issue_type`: "Missing in ERP BOM (In Drawing Only)".
-                           - IF AN ITEM EXISTS IN BOTH BUT QUANTITIES DO NOT MATCH:
-                             - `issue_type`: "Quantity Mismatch".
+                        4. PART DESCRIPTION COMPARISON:
+                           - Compare text descriptions for matching part codes. Flag material grade, dimensions, or text mismatches as "DESCRIPTION_MISMATCH".
 
-                        4. PART DESCRIPTION COMPARISON CHECK:
-                           - For every part number present in BOTH the drawing set and the ERP BOM:
-                           - Compare the text description in the PDF drawing's bill of materials/title block against the Description column in the ERP BOM.
-                           - If there is a material discrepancy in specification, dimensions, material grade, or wording:
-                             - `issue_type`: "Description Mismatch".
-                             - `drawing_details`: "Drawing Description: '[Exact Drawing Description]'".
-                             - `erp_details`: "ERP Description: '[Exact ERP Description]'".
-                             - `recommendation`: "Align description across drawing title block and ERP BOM for consistency."
-
-                        5. CUT-LENGTH / VARIANT CALCULATIONS:
-                           - Cut Length (mm) x Quantity. Sum parent profile lengths and calculate required stock pieces = ceil(Total Length / {stock_length_mm}).
-                        
                         ERP BOM Data Table:
                         {erp_df.to_csv(index=False)}
                         """
@@ -294,6 +288,25 @@ with tab_audit:
                             "properties": {
                                 "audit_status": {"type": "STRING"},
                                 "general_notes": {"type": "STRING"},
+                                "master_parts_list": {
+                                    "type": "ARRAY",
+                                    "items": {
+                                        "type": "OBJECT",
+                                        "properties": {
+                                            "part_number": {"type": "STRING"},
+                                            "drawing_description": {"type": "STRING"},
+                                            "drawing_quantity": {"type": "STRING"},
+                                            "erp_description": {"type": "STRING"},
+                                            "erp_quantity": {"type": "STRING"},
+                                            "status": {"type": "STRING"},
+                                            "notes": {"type": "STRING"}
+                                        },
+                                        "required": [
+                                            "part_number", "drawing_description", "drawing_quantity", 
+                                            "erp_description", "erp_quantity", "status", "notes"
+                                        ]
+                                    }
+                                },
                                 "discrepancies": {
                                     "type": "ARRAY",
                                     "items": {
@@ -309,7 +322,7 @@ with tab_audit:
                                     }
                                 }
                             },
-                            "required": ["audit_status", "discrepancies", "general_notes"]
+                            "required": ["audit_status", "master_parts_list", "discrepancies", "general_notes"]
                         }
 
                         response = client.models.generate_content(
@@ -327,17 +340,29 @@ with tab_audit:
                         st.write(f"**Notes:** {audit_result.get('general_notes')}")
                         
                         disc_list = audit_result.get("discrepancies", [])
-                        disc_df = pd.DataFrame(disc_list) if disc_list else None
+                        master_list = audit_result.get("master_parts_list", [])
 
+                        disc_df = pd.DataFrame(disc_list) if disc_list else None
+                        master_df = pd.DataFrame(master_list) if master_list else None
+
+                        # Display Discrepancies
                         if disc_df is not None and not disc_df.empty:
-                            st.warning(f"Found {len(disc_list)} Discrepancies (Includes Missing Drawings, Quantity Mismatches & Description Differences):")
+                            st.warning(f"Found {len(disc_list)} Discrepancies:")
                             st.dataframe(disc_df, use_container_width=True)
                         else:
                             st.info("No discrepancies found. ERP BOM perfectly matches drawings bi-directionally.")
 
-                        excel_data = generate_excel_report(audit_result, disc_df, selected_category, selected_model, total_files, total_pages, stock_length_mm)
+                        # Display Full Itemized Master List
+                        if master_df is not None and not master_df.empty:
+                            with st.expander(f"📋 View Full Master Reconciliation Table ({len(master_df)} total items cross-checked)", expanded=True):
+                                st.dataframe(master_df, use_container_width=True)
+
+                        excel_data = generate_excel_report(
+                            audit_result, disc_df, master_df, selected_category, 
+                            selected_model, total_files, total_pages, stock_length_mm
+                        )
                         st.download_button(
-                            label="📥 Download Excel Audit Report",
+                            label="📥 Download Excel Audit Report (With Full Master Reconciliation)",
                             data=excel_data,
                             file_name=f"audit_{selected_category.lower().replace(' ', '_')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
